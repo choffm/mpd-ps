@@ -17,8 +17,8 @@ def remove_empty_dirs(path):
 
 parser = argparse.ArgumentParser()
 
-parser.add_argument("--encoder", help="Specify manual encoder settings (e.g. lame -V2 or oggenc -q4). The string is parsed "
-                                      "directly to bash. Default: oggenc -q4 --resample 44100",
+parser.add_argument("--encoder", help="\"ogg\" for ogg vorbis q4 (~130kb/s) or \"mp3\" for lame V2 (~180kb/s)."
+                                      " Default: ogg q4, 44,1khz",
                     dest="encoder")
 parser.add_argument("--copy-flac", help="copy flac files instead of transcoding them",
                     action="store_true")
@@ -57,8 +57,11 @@ else:
 
 if args.encoder:
     encoder = args.encoder
+    if encoder != "ogg" and encoder != "mp3":
+        logger.error("Bad encoder parameter.")
+        exit(-1)
 else:
-    encoder = "oggenc -q4 --resample 44100"
+    encoder = "ogg"
 
 if args.copy_flac:
     copy_flac = True
@@ -166,7 +169,11 @@ print("Transferred " + str(size) + " MB.")
 if flac_files:
     print("Start transcoding flac files now.")
     for list in flac_files:
-        os.system("parallel " + threads + " " + encoder + " \"" + mpd_root_dir + "/{}\" -o \"" + dest_dir + "/{.}.ogg\" ::: \"" + '" "'.join(flac_files[list]) + "\"")
+        if encoder == "ogg":
+            os.system("parallel " + threads + " oggenc -q 4 --resample 44100 \"" + mpd_root_dir + "/{}\" -o \"" + dest_dir + "/{.}.ogg\" ::: \"" + '" "'.join(flac_files[list]) + "\"")
+        else:
+            #todo: add tags to mp3s
+            os.system("parallel " + threads + " lame -V 2 --resample 44.1 \"" + mpd_root_dir + "/{}\" \"" + dest_dir + "/{.}.mp3\" ::: \"" + '" "'.join(flac_files[list]) + "\"")
         #find -name "*.flac" | parallel -q oggenc -q4 {} -o /tmp/oggout/'{= s/replace/by/g =}'
 
 print("Start Copying album art now.")
