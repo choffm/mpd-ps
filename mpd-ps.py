@@ -133,7 +133,7 @@ for item in playlist:
     # Transcode flac files to ogg vorbis q4 on destination
     if filename[filename.rfind('.')+1:] == "flac" and not copy_flac:
         os.environ ['infile'] = src_full_path
-        transcoded_file = dest_full_path[:dest_full_path.rfind('.')] + ".ogg"
+        transcoded_file = dest_full_path[:dest_full_path.rfind('.')] + "." + encoder
         added_files.add(transcoded_file)
         os.environ['outfile'] = transcoded_file
         if not os.path.exists(transcoded_file):
@@ -173,7 +173,9 @@ if flac_files:
             os.system("parallel " + threads + " oggenc -q 4 --resample 44100 \"" + mpd_root_dir + "/{}\" -o \"" + dest_dir + "/{.}.ogg\" ::: \"" + '" "'.join(flac_files[list]) + "\"")
         else:
             #todo: add tags to mp3s
-            os.system("parallel " + threads + " lame -V 2 --resample 44.1 \"" + mpd_root_dir + "/{}\" \"" + dest_dir + "/{.}.mp3\" ::: \"" + '" "'.join(flac_files[list]) + "\"")
+            #todo: add parallelization
+            for file in flac_files[list]:
+                os.system("flac -d -c \"" + os.path.join(mpd_root_dir,file) + "\" | lame -V 2 --resample 44.1 - \"" + dest_dir + file[:file.rfind('.')] + ".mp3\"")
         #find -name "*.flac" | parallel -q oggenc -q4 {} -o /tmp/oggout/'{= s/replace/by/g =}'
 
 print("Start Copying album art now.")
