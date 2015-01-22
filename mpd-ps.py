@@ -6,6 +6,10 @@ import shutil
 import time
 import logging
 import argparse
+import subprocess
+import platform
+from mutagen.flac import FLAC
+
 
 def remove_empty_dirs(path):
     for root, dirnames, filenames in os.walk(path, topdown=False):
@@ -107,6 +111,7 @@ mytime = 0
 added_files = set()
 folders = {}
 count = 0
+platform = platform.system().lower()
 
 for item in playlist:
 
@@ -160,23 +165,58 @@ for item in playlist:
             mytime += (current_milli_time() - cur_time) / 1000
             size += os.path.getsize(dest_full_path) / (1024*1024)
             if mytime != 0:
-                print("Transferred " + str(count) + " files with " + str(size / mytime) + "MB/s")
+                logger.info("Transferred " + str(count) + " files with " + str(size / mytime)[:str(size / mytime).find(".")+3] + "MB/s")
         except OSError:
             logger.error("Copying " + src_full_path + " to " + dest_full_path + " failed. Skipping file.")
 
-print("Transferred " + str(size) + " MB.")
+logger.info("Transferred " + str(size)[:str(size).find(".")+3] + " MB.")
 
 if flac_files:
-    print("Start transcoding flac files now.")
+    logger.info("Start transcoding flac files now.")
+    processes = set()
+    max_processes = 8
     for list in flac_files:
         if encoder == "ogg":
-            os.system("parallel " + threads + " oggenc -q 4 --resample 44100 \"" + mpd_root_dir + "/{}\" -o \"" + dest_dir + "/{.}.ogg\" ::: \"" + '" "'.join(flac_files[list]) + "\"")
-        else:
-            #todo: add tags to mp3s
-            #todo: add parallelization
             for file in flac_files[list]:
-                os.system("flac -d -c \"" + os.path.join(mpd_root_dir,file) + "\" | lame -V 2 --resample 44.1 - \"" + dest_dir + file[:file.rfind('.')] + ".mp3\"")
-        #find -name "*.flac" | parallel -q oggenc -q4 {} -o /tmp/oggout/'{= s/replace/by/g =}'
+                logger.info("Encoding " + os.path.join(dest_dir,file[:-4] + "ogg"))
+                processes.add(subprocess.Popen(["oggenc", "-q", "4", "--resample", "44100",
+                                                os.path.join(mpd_root_dir,file), "-o", os.path.join(dest_dir,file[:-4] + "ogg")],
+                                               stdout=subprocess.PIPE, stderr=subprocess.PIPE))
+                if platform == "windows":
+                    while len(processes) >= max_processes:
+                        time.sleep(.1) #for windows compatibility
+                        processes.difference_update([p for p in processes if p.poll() is not None])
+                else:
+                    if len(processes) >= max_processes:
+                        os.wait()
+                        processes.difference_update([p for p in processes if p.poll() is not None])
+        else:
+            for file in flac_files[list]:
+                audio = FLAC(os.path.join(mpd_root_dir,file))
+                title = "" if audio.get("title") == None else audio.get("title")[0]
+                artist = "" if audio.get("artist") == None else audio.get("artist")[0]
+                album = "" if audio.get("album") == None else audio.get("album")[0]
+                genre = "" if audio.get("genre") == None else audio.get("genre")[0]
+                tracknumber = "" if audio.get("tracknumber") == None else audio.get("tracknumber")[0]
+                date = "" if audio.get("date") == None else audio.get("date")[0]
+
+                logger.info("Encoding " + os.path.join(dest_dir,file[:-4] + "mp3"))
+                ps = subprocess.Popen(["flac",  "-d", "-c", os.path.join(mpd_root_dir,file)],
+                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                ps2 = subprocess.Popen(["lame", "-V2", "--resample", "44.1", "--tt", title,
+                                           "--ta", artist, "--tl", album, "--ty", date,
+                                           "--tn", tracknumber, "--tg", genre, "--id3v2-only", "--id3v2-utf16"
+                                           , "-", os.path.join(dest_dir,file[:-4] + "mp3")],
+                                       stdin=ps.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                processes.add(ps2)
+                if platform == "windows":
+                    while len(processes) >= max_processes:
+                        time.sleep(.1) #for windows compatibility
+                        processes.difference_update([p for p in processes if p.poll() is not None])
+                else:
+                    while len(processes) >= max_processes:
+                        os.wait()
+                        processes.difference_update([p for p in processes if p.poll() is not None])
 
 print("Start Copying album art now.")
 # Copying image files (jpg,png) to destination (covers etc)
