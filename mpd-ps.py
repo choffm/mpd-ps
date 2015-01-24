@@ -8,6 +8,7 @@ import logging
 import argparse
 import subprocess
 import platform
+import multiprocessing
 from mutagen.flac import FLAC
 
 
@@ -21,9 +22,9 @@ def remove_empty_dirs(path):
 
 parser = argparse.ArgumentParser()
 
-parser.add_argument("--encoder", help="\"ogg\" for ogg vorbis q4 (~130kb/s) or \"mp3\" for lame V2 (~180kb/s)."
+parser.add_argument("--audio-format", help="\"ogg\" for ogg vorbis q4 (~130kb/s) or \"mp3\" for lame V2 (~180kb/s)."
                                       " Default: ogg q4, 44,1khz",
-                    dest="encoder")
+                    dest="audio_format")
 parser.add_argument("--copy-flac", help="copy flac files instead of transcoding them",
                     action="store_true")
 parser.add_argument("--threads", help="Amount of parallel encoding processes when transcoding flac files. Default: Auto-detect", type=int,
@@ -59,16 +60,18 @@ else:
     logger.error("Please specify the output folder with -out parameter.")
     exit()
 
-if args.encoder:
-    encoder = args.encoder
-    if encoder != "ogg" and encoder != "mp3":
-        logger.error("Bad encoder parameter.")
+if args.audio_format:
+    audio_format = args.audio_format
+    if audio_format != "ogg" and audio_format != "mp3":
+        logger.error("Bad audio format parameter.")
         exit(-1)
 else:
-    encoder = "ogg"
+    audio_format = "ogg"
 
 if args.copy_flac:
     copy_flac = True
+    if args.audio_format:
+        logger.warn("Copying flac files instead of transcoding. Specified audio format settings is ignored.")
 else:
     copy_flac = False
 
@@ -88,9 +91,9 @@ else:
     password = ""
 
 if args.threads and args.threads > 0:
-    threads = "j" + args.threads
+    threads = args.threads
 else:
-    threads = ""
+    threads = multiprocessing.cpu_count()
 
 current_milli_time = lambda: int(round(time.time() * 1000))
 
@@ -112,6 +115,7 @@ added_files = set()
 folders = {}
 count = 0
 platform = platform.system().lower()
+
 
 for item in playlist:
 
@@ -138,7 +142,7 @@ for item in playlist:
     # Transcode flac files to ogg vorbis q4 on destination
     if filename[filename.rfind('.')+1:] == "flac" and not copy_flac:
         os.environ ['infile'] = src_full_path
-        transcoded_file = dest_full_path[:dest_full_path.rfind('.')] + "." + encoder
+        transcoded_file = dest_full_path[:dest_full_path.rfind('.')] + "." + audio_format
         added_files.add(transcoded_file)
         os.environ['outfile'] = transcoded_file
         if not os.path.exists(transcoded_file):
@@ -174,20 +178,19 @@ logger.info("Transferred " + str(size)[:str(size).find(".")+3] + " MB.")
 if flac_files:
     logger.info("Start transcoding flac files now.")
     processes = set()
-    max_processes = 8
     for list in flac_files:
-        if encoder == "ogg":
+        if audio_format == "ogg":
             for file in flac_files[list]:
                 logger.info("Encoding " + os.path.join(dest_dir,file[:-4] + "ogg"))
                 processes.add(subprocess.Popen(["oggenc", "-q", "4", "--resample", "44100",
                                                 os.path.join(mpd_root_dir,file), "-o", os.path.join(dest_dir,file[:-4] + "ogg")],
                                                stdout=subprocess.PIPE, stderr=subprocess.PIPE))
                 if platform == "windows":
-                    while len(processes) >= max_processes:
+                    while len(processes) >= threads:
                         time.sleep(.1) #for windows compatibility
                         processes.difference_update([p for p in processes if p.poll() is not None])
                 else:
-                    if len(processes) >= max_processes:
+                    if len(processes) >= threads:
                         os.wait()
                         processes.difference_update([p for p in processes if p.poll() is not None])
         else:
@@ -210,11 +213,11 @@ if flac_files:
                                        stdin=ps.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 processes.add(ps2)
                 if platform == "windows":
-                    while len(processes) >= max_processes:
+                    while len(processes) >= threads:
                         time.sleep(.1) #for windows compatibility
                         processes.difference_update([p for p in processes if p.poll() is not None])
                 else:
-                    while len(processes) >= max_processes:
+                    while len(processes) >= threads:
                         os.wait()
                         processes.difference_update([p for p in processes if p.poll() is not None])
 
