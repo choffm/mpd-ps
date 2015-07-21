@@ -16,4 +16,5 @@ Features:
 - Optionally syncs album art
 - Optionally transcodes .flac files to ogg vorbis, opus or mp3 using oggenc, ffmpeg/libopus and lame mp3 encoder
 - Multi-threaded transcoding of flac to MP3 or OGG Vorbis 
+- Supports config file (Default: ~/.config/mpd-ps/mpd-ps.conf or HOME/AppData/Roaming/mpd-ps/mpd-ps.conf)
 
