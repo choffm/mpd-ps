@@ -66,6 +66,8 @@ audio_format = "opus"
 copy_flac = False
 threads = ""
 verbose = False
+delete_non_existent = False
+copy_album_art = True
 
 ##Parse config file
 config = configparser.RawConfigParser()
@@ -91,6 +93,12 @@ if os.path.exists(config_file):
             threads = config.getint('General', 'threads')
         if config.has_option('General', 'verbose'):
             verbose = config.getboolean('General', 'verbose')
+        if config.has_option('General', 'delete_non_existent'):
+            delete_non_existent = config.getboolean('General', 'delete_non_existent')
+        if config.has_option('General', 'copy_album_art'):
+            copy_album_art = config.getboolean('General', 'copy_album_art')
+
+
 
 ##Parse command line arguments
 logger = logging.getLogger("mpd-ps")
@@ -149,6 +157,12 @@ if args.threads and args.threads > 0:
 elif not threads or threads <= 0:
     threads = multiprocessing.cpu_count()
 
+if args.dont_copy_album_art:
+    copy_album_art = False
+
+if args.delete_non_existent:
+    delete_not_existent = True
+
 logger.info('Host: ' + host + ":" + str(port))
 logger.info('MPD music folder: ' + mpd_root_dir)
 logger.info('Destination folder: ' + dest_dir)
@@ -160,7 +174,6 @@ current_milli_time = lambda: int(round(time.time() * 1000))
 client = MPDClient()
 client.timeout = 10
 client.idletimeout = None          # timeout for fetching the result of the idle command is handled seperately, default: None
-
 client.connect(host, port)  # connect to localhost:6600
 client.password(password)
 
@@ -304,10 +317,10 @@ if flac_files:
 logger.info("Start Copying album art now.")
 # Copying image files (jpg,png) to destination (covers etc)
 
-if not args.dont_copy_album_art:
+if copy_album_art:
     for src in folders:
         for file in os.listdir(src):
-            if file.endswith(".jpg") or file.endswith(".png"):
+            if file.endswith(".jpg") or file.endswith(".png") or file.endswith(".gif"):
                 added_files.add(folders[src] + file)
                 if not os.path.isfile(os.path.join(folders[src],file)):
                     shutil.copy(src+file,os.path.join(folders[src],file))
@@ -315,7 +328,7 @@ if not args.dont_copy_album_art:
                 else:
                     logger.debug("Cover exists: " + folders[src] + file)
 
-if args.delete_non_existent:
+if delete_non_existent:
     logger.info("Start removing files now.")
     # Remove files from destination that are not in playlist any more
     dest_files = [os.path.join(dp, f) for dp, dn, filenames in os.walk(dest_dir) for f in filenames]
