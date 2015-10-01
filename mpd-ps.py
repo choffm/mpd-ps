@@ -10,7 +10,18 @@ import subprocess
 import platform
 import multiprocessing
 import configparser
+
 from mutagen.flac import FLAC
+from mutagen.id3 import ID3
+
+import re
+import sys
+
+
+class transcode_job:
+    def __init__(self,src,dest):
+        self.src = src
+        self.dest = dest
 
 def remove_empty_dirs(path):
     for root, dirnames, filenames in os.walk(path, topdown=False):
@@ -99,7 +110,6 @@ if os.path.exists(config_file):
             copy_album_art = config.getboolean('General', 'copy_album_art')
 
 
-
 ##Parse command line arguments
 logger = logging.getLogger("mpd-ps")
 if args.verbose or verbose:
@@ -114,13 +124,13 @@ if args.mpd_music_folder:
     mpd_root_dir = args.mpd_music_folder
 elif not mpd_root_dir:
     logger.error("Please specify the root folder of mpd server with -in parameter.")
-    exit()
+    exit(-1)
 
 if args.destination_folder:
     dest_dir = args.destination_folder
 elif not dest_dir:
     logger.error("Please specify the output folder with -out parameter.")
-    exit()
+    exit(-1)
 
 if args.audio_format:
     audio_format = args.audio_format
@@ -195,60 +205,62 @@ item_size = 0
 for item in playlist:
     if item_size % 10 == 0:
         logger.info("Processed " + str(item_size) + "/" + str(len(playlist)) + " files ("+str(int(100*item_size/len(playlist)))+"%).")
-    src_full_path = os.path.join(mpd_root_dir,item[6:]) #exclude "file: "
-    src_path = src_full_path[:src_full_path.rfind('/')+1] #stripped filename
-    item_short_path = item[:item.rfind('/')+1] #relative path without filename
+    src_relative_name = item[6:]
+    src_relativ_path = os.path.dirname(src_relative_name)
+    src_absolute_name = os.path.join(mpd_root_dir,src_relative_name) #exclude "file: "
+    src_absolute_path = os.path.dirname(src_absolute_name)
 
-    dest_full_path = os.path.join(dest_dir,item[6:]) #exclude "file " (: replaced by re.sub()
-    dest_path = dest_full_path[:dest_full_path.rfind('/')+1]
-    filename = dest_full_path[dest_full_path.rfind('/')+1:]
+    dest_absolute_name = os.path.join(dest_dir,src_relative_name) #exclude "file " (: replaced by re.sub()
 
-    folders[src_path] = dest_path
+    dest_absolute_path = os.path.dirname(dest_absolute_name)
+
+    folders[src_absolute_path] = dest_absolute_path
     item_size += 1
     # Skip existing files
-    if os.path.isfile(dest_full_path) and os.path.getsize(dest_full_path) == os.path.getsize(src_full_path):
-        logger.debug("file " + dest_full_path + " exists. Skipping.")
-        added_files.add(dest_full_path)
+    if os.path.isfile(dest_absolute_name) and os.path.getsize(dest_absolute_name) == os.path.getsize(src_absolute_name):
+        logger.debug("file " + dest_absolute_name + " exists. Skipping.")
+        added_files.add(dest_absolute_name)
         continue
 
     # Create directories on destination, if they don't exist
-    if not os.path.exists(dest_path):
-        os.makedirs(dest_path)
+    if not os.path.exists(dest_absolute_path):
+        os.makedirs(dest_absolute_path)
 
     # Transcode flac files to ogg vorbis q4 on destination
-    if filename[filename.rfind('.')+1:] == "flac" and not copy_flac:
-        os.environ ['infile'] = src_full_path
-        transcoded_file = dest_full_path[:dest_full_path.rfind('.')] + "." + audio_format
-        added_files.add(transcoded_file)
-        os.environ['outfile'] = transcoded_file
-        if not os.path.exists(transcoded_file):
-            if item_short_path[6:] in flac_files:
+    if dest_absolute_name.endswith(".flac") and not copy_flac:
 
-                flac_files[item_short_path[6:]].append(item[6:])
+        dest_absolute_name = re.sub(r".flac$", "." + audio_format, dest_absolute_name) # replace file extension
+        #transcoded_file = dest_absolute_name[:dest_absolute_name.rfind('.')] + "." + audio_format
+        added_files.add(dest_absolute_name)
+
+        if not os.path.exists(dest_absolute_name):
+            if src_relativ_path in flac_files:
+
+                flac_files[src_relativ_path].append(transcode_job(src_absolute_name, dest_absolute_name))
                 flac_files_size += 1
 
             else:
-                flac_files[item_short_path[6:]] = []
-                flac_files[item_short_path[6:]].append(item[6:])
+                flac_files[src_relativ_path] = []
+                flac_files[src_relativ_path].append(transcode_job(src_absolute_name, dest_absolute_name))
                 flac_files_size += 1
         else:
-            logger.debug("Transcoded file exists: " + transcoded_file)
+            logger.debug("Transcoded file exists: " + dest_absolute_name)
 
     # Copy non-flac media files directly to destination
     else:
-        added_files.add(dest_full_path)
+        added_files.add(dest_absolute_name)
         cur_time = current_milli_time()
         try:
-            shutil.copy(src_full_path,dest_full_path)
+            shutil.copy(src_absolute_name,dest_absolute_name)
             count+=1
-            logger.debug("Copied file to: " + dest_full_path)
+            logger.debug("Copied file to: " + dest_absolute_name)
 
             mytime += (current_milli_time() - cur_time) / 1000
-            size += os.path.getsize(dest_full_path) / (1024*1024)
+            size += os.path.getsize(dest_absolute_name) / (1024*1024)
             if mytime != 0:
                 logger.debug("Transferred " + str(count) + " files with " + str(size / mytime)[:str(size / mytime).find(".")+3] + "MB/s")
         except OSError:
-            logger.error("Copying " + src_full_path + " to " + dest_full_path + " failed. Skipping file.")
+            logger.error("Copying " + src_absolute_name + " to " + dest_absolute_name + " failed. Skipping file.")
 
 logger.info("Transferred " + str(size)[:str(size).find(".")+3] + " MB.")
 
@@ -258,10 +270,10 @@ if flac_files:
     processes = set()
     for list in flac_files:
         if audio_format == "ogg":
-            for file in flac_files[list]:
-                logger.debug("Encoding " + os.path.join(dest_dir,file[:-4] + "ogg"))
+            for job in flac_files[list]:
+                logger.debug("Encoding file:" + job.dest)
                 processes.add(subprocess.Popen(["oggenc", "-q", "4", "--resample", "44100",
-                                                os.path.join(mpd_root_dir,file), "-o", os.path.join(dest_dir,file[:-4] + "ogg")],
+                                                job.src, "-o", job.dest],
                                                stdout=subprocess.PIPE, stderr=subprocess.PIPE))
                 if platform == "windows":
                     while len(processes) >= threads:
@@ -272,8 +284,9 @@ if flac_files:
                         os.wait()
                         processes.difference_update([p for p in processes if p.poll() is not None])
         elif audio_format == "mp3":
-            for file in flac_files[list]:
-                audio = FLAC(os.path.join(mpd_root_dir,file))
+            for job in flac_files[list]:
+                logger.debug("Encoding file:" + job.dest)
+                audio = FLAC(job.src)
                 title = "" if audio.get("title") == None else audio.get("title")[0]
                 artist = "" if audio.get("artist") == None else audio.get("artist")[0]
                 album = "" if audio.get("album") == None else audio.get("album")[0]
@@ -281,13 +294,12 @@ if flac_files:
                 tracknumber = "" if audio.get("tracknumber") == None else audio.get("tracknumber")[0]
                 date = "" if audio.get("date") == None else audio.get("date")[0]
 
-                logger.debug("Encoding " + os.path.join(dest_dir,file[:-4] + "mp3"))
-                ps = subprocess.Popen(["flac",  "-d", "-c", os.path.join(mpd_root_dir,file)],
+                ps = subprocess.Popen(["flac",  "-d", "-c", job.src],
                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 ps2 = subprocess.Popen(["lame", "-V2", "--resample", "44.1", "--tt", title,
                                            "--ta", artist, "--tl", album, "--ty", date,
                                            "--tn", tracknumber, "--tg", genre, "--id3v2-only", "--id3v2-utf16"
-                                           , "-", os.path.join(dest_dir,file[:-4] + "mp3")],
+                                           , "-", job.dest],
                                        stdin=ps.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 processes.add(ps2)
                 if platform == "windows":
@@ -299,10 +311,11 @@ if flac_files:
                         os.wait()
                         processes.difference_update([p for p in processes if p.poll() is not None])
         elif audio_format == "opus":
-            for file in flac_files[list]:
-                logger.debug("Encoding " + os.path.join(dest_dir,file[:-4] + "opus"))
-                processes.add(subprocess.Popen(["ffmpeg", "-i", os.path.join(mpd_root_dir,file),
-                                                "-c", "libopus", os.path.join(dest_dir,file[:-4] + "opus")],
+            for job in flac_files[list]:
+                logger.debug("Encoding file:" + job.dest)
+                #use ffmpeg instead of opusenc for preventing the application of R128 gain, making replaygain work as expected
+                processes.add(subprocess.Popen(["ffmpeg", "-i", job.src,
+                                                "-c", "libopus", job.dest],
                                                stdout=subprocess.PIPE, stderr=subprocess.PIPE))
                 if platform == "windows":
                     while len(processes) >= threads:
@@ -314,23 +327,25 @@ if flac_files:
                         processes.difference_update([p for p in processes if p.poll() is not None])
         done += len(flac_files[list])
         logger.info("Encoded " + str(done) + "/" + str(flac_files_size) + " files ("+str(int(100*done/flac_files_size))+"%).")
-logger.info("Start Copying album art now.")
-# Copying image files (jpg,png) to destination (covers etc)
 
+# Copy image files (jpg,png,gif) to destination
 if copy_album_art:
-    for src in folders:
-        for file in os.listdir(src):
+    logger.info("Start Copying album art now.")
+    for folder in folders:
+        for file in os.listdir(folder):
             if file.endswith(".jpg") or file.endswith(".png") or file.endswith(".gif"):
-                added_files.add(folders[src] + file)
-                if not os.path.isfile(os.path.join(folders[src],file)):
-                    shutil.copy(src+file,os.path.join(folders[src],file))
-                    logger.debug("Copies image: " + file + " to " + folders[src])
+                image_src = os.path.join(folder,file)
+                image_dest = os.path.join(folders[folder],file)
+                added_files.add(image_dest)
+                if not os.path.isfile(image_dest):
+                    shutil.copy(image_src,image_dest)
+                    logger.debug("Copying album art: " + image_dest)
                 else:
-                    logger.debug("Cover exists: " + folders[src] + file)
+                    logger.debug("Album art exists: " + image_dest)
 
+# Remove files from destination that are not in playlist any more
 if delete_non_existent:
     logger.info("Start removing files now.")
-    # Remove files from destination that are not in playlist any more
     dest_files = [os.path.join(dp, f) for dp, dn, filenames in os.walk(dest_dir) for f in filenames]
     for f in dest_files:
         if not f in added_files:
