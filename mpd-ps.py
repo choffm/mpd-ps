@@ -55,8 +55,8 @@ parser.add_argument("--delete-non-existent", help="delete files from destination
 parser.add_argument("--dont-copy-album-art", help="do not copy .jpg and .png album art to destination.",
                     action="store_true")
 
-parser.add_argument("mpd_music_folder", nargs='?', metavar="mpd-music-folder", help="root folder of mpd server")
-parser.add_argument("destination_folder", nargs='?', metavar="destination-folder", help="folder where the audio files are copied / transcoded to")
+parser.add_argument("--src",  metavar="mpd-music-folder", help="root folder of mpd server")
+parser.add_argument("--dest", metavar="destination-folder", help="folder where the audio files are copied / transcoded to")
 
 args = parser.parse_args()
 
@@ -92,10 +92,10 @@ if os.path.exists(config_file):
         if config.has_option('Host', 'password'):
             password = config.get('Host', 'password')
     if config.has_section('General'):
-        if config.has_option('General', 'mpd_music_folder'):
-            mpd_root_dir = config.get('General', 'mpd_music_folder')
-        if config.has_option('General', 'dest_dir'):
-            dest_dir = config.get('General', 'dest_dir')
+        if config.has_option('General', 'src'):
+            mpd_root_dir = config.get('General', 'src')
+        if config.has_option('General', 'dest'):
+            dest_dir = config.get('General', 'dest')
         if config.has_option('General', 'audio_format'):
             audio_format = config.get('General', 'audio_format')
         if config.has_option('General', 'copy_flac'):
@@ -120,14 +120,14 @@ else:
 if (os.path.exists(config_file)):
     logger.info('Using configuration file: ' + config_file)
 
-if args.mpd_music_folder:
-    mpd_root_dir = args.mpd_music_folder
+if args.src:
+    mpd_root_dir = args.src
 elif not mpd_root_dir:
     logger.error("Please specify the root folder of mpd server with -in parameter.")
     exit(-1)
 
-if args.destination_folder:
-    dest_dir = args.destination_folder
+if args.dest:
+    dest_dir = args.dest
 elif not dest_dir:
     logger.error("Please specify the output folder with -out parameter.")
     exit(-1)
