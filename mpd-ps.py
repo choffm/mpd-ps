@@ -12,11 +12,10 @@ import multiprocessing
 import configparser
 
 from mutagen.flac import FLAC
-from mutagen.id3 import ID3
+from mutagen.mp3 import MP3
+from mutagen.mp4 import MP4
 
 import re
-import sys
-
 
 class transcode_job:
     def __init__(self,src,dest):
@@ -35,28 +34,7 @@ platform = platform.system().lower()
 parser = argparse.ArgumentParser()
 parser.add_argument("--config", help="specify path to config file.",
                     dest="config")
-parser.add_argument("--audio-format", help="\"ogg\" for ogg vorbis q4 (~130kb/s), \"opus\" for opus (~96kbit/s) or \"mp3\" for lame V2 (~180kb/s)."
-                                      " Default: opus",
-                    dest="audio_format")
-parser.add_argument("--copy-flac", help="copy flac files instead of transcoding them",
-                    action="store_true")
-parser.add_argument("--verbose", help="Print more information",
-                    action="store_true")
-parser.add_argument("--threads", help="Amount of parallel encoding processes when transcoding flac files. Default: Auto-detect", type=int,
-                    dest="threads")
-parser.add_argument("--host", help="adress of mpd server. Default: localhost",
-                    dest="host")
-parser.add_argument("--port", help="port of mpd server. Default: 6600", type=int,
-                    dest="port")
-parser.add_argument("--password", help="password of mpd server.",
-                    dest="password")
-parser.add_argument("--delete-non-existent", help="delete files from destination which are not in mpd playlist. Also deletes empty "
-                                                  "directories in destination folder", action="store_true")
-parser.add_argument("--dont-copy-album-art", help="do not copy .jpg and .png album art to destination.",
-                    action="store_true")
 
-parser.add_argument("--src",  metavar="mpd-music-folder", help="root folder of mpd server")
-parser.add_argument("--dest", metavar="destination-folder", help="folder where the audio files are copied / transcoded to")
 
 args = parser.parse_args()
 
@@ -74,11 +52,18 @@ password = ""
 mpd_root_dir = ""
 dest_dir = ""
 audio_format = "opus"
-copy_flac = False
 threads = ""
 verbose = False
 delete_non_existent = False
 copy_album_art = True
+transcode_flac = True
+transcode_mp3 = False
+transcode_m4a = False
+transcode_m4a_threshold = 200000
+transcode_mp3_threshold = 200000
+audio_quality_lame = 3
+audio_quality_opus = 96000
+audio_quality_vorbis = 4
 
 ##Parse config file
 config = configparser.RawConfigParser()
@@ -98,8 +83,8 @@ if os.path.exists(config_file):
             dest_dir = config.get('General', 'dest')
         if config.has_option('General', 'audio_format'):
             audio_format = config.get('General', 'audio_format')
-        if config.has_option('General', 'copy_flac'):
-            copy_flac = config.getboolean('General', 'copy_flac')
+        if config.has_option('General', 'transcode_flac'):
+            transcode_flac = config.getboolean('General', 'transcode_flac')
         if config.has_option('General', 'threads'):
             threads = config.getint('General', 'threads')
         if config.has_option('General', 'verbose'):
@@ -108,75 +93,70 @@ if os.path.exists(config_file):
             delete_non_existent = config.getboolean('General', 'delete_non_existent')
         if config.has_option('General', 'copy_album_art'):
             copy_album_art = config.getboolean('General', 'copy_album_art')
-
+        if config.has_option('General', 'transcode_m4a'):
+            transcode_m4a = config.getboolean('General', 'transcode_m4a')
+        if config.has_option('General', 'transcode_m4a_threshold'):
+            transcode_m4a_threshold = config.getint('General', 'transcode_m4a_threshold')
+        if config.has_option('General', 'transcode_mp3'):
+            transcode_mp3 = config.getboolean('General', 'transcode_mp3')
+        if config.has_option('General', 'transcode_mp3_threshold'):
+            transcode_mp3_threshold = config.getint('General', 'transcode_mp3_threshold')
+        if config.has_option('General', 'audio_quality_lame'): # 0 - 10,
+            audio_quality_lame = config.getint('General', 'audio_quality_lame')
+        if config.has_option('General', 'audio_quality_vorbis'): # -1  - 10, fractions allowed
+            audio_quality_vorbis = config.getfloat('General', 'audio_quality_vorbis')
+        if config.has_option('General', 'audio_quality_opus'): # in bit/s
+            audio_quality_opus = config.getint('General', 'audio_quality_opus')
 
 ##Parse command line arguments
 logger = logging.getLogger("mpd-ps")
-if args.verbose or verbose:
+if verbose:
     logging.basicConfig(level=logging.DEBUG)
 else:
     logging.basicConfig(level=logging.INFO)
 
 if (os.path.exists(config_file)):
     logger.info('Using configuration file: ' + config_file)
-
-if args.src:
-    mpd_root_dir = args.src
-elif not mpd_root_dir:
-    logger.error("Please specify the root folder of mpd server with -in parameter.")
+else:
+    logger.error('Configuration file ' + config_file + " doesn't not exist. Aborting.")
     exit(-1)
 
-if args.dest:
-    dest_dir = args.dest
-elif not dest_dir:
-    logger.error("Please specify the output folder with -out parameter.")
+if not mpd_root_dir:
+    logger.error("Please specify the root folder of mpd server within config file. (src=)")
     exit(-1)
 
-if args.audio_format:
-    audio_format = args.audio_format
-elif audio_format == "":
+if not dest_dir:
+    logger.error("Please specify the destination folder within config file. (dest=)")
+    exit(-1)
+
+if audio_format == "":
     audio_format = "opus"
-if audio_format != "ogg" and audio_format != "mp3" and audio_format != "opus":
-        logger.error("Bad audio format parameter.")
-        exit(-1)
+elif audio_format != "ogg" and audio_format != "mp3" and audio_format != "opus":
+    logger.error("Bad audio format. mpd-ps supports ogg, opus and mp3.")
+    exit(-1)
 
-if args.copy_flac or copy_flac:
-    copy_flac = True
-    if audio_format:
-        logger.warn("Copying flac files instead of transcoding. Specified audio format settings is ignored.")
-elif not copy_flac:
-    copy_flac = False
+if not transcode_flac:
+    logger.warn("Copying flac files instead of transcoding. Specified audio format settings is ignored.")
 
-if args.host:
-    host = args.host
-elif not host:
+if not host:
     host = "localhost"
 
-if args.port:
-    port = args.port
-elif not port:
+if not port:
     port = 6600
 
-if args.password:
-    password = args.password
-elif not password:
+if not password:
     password = ""
 
-if args.threads and args.threads > 0:
-    threads = args.threads
-elif not threads or threads <= 0:
+if threads or threads <= 0:
     threads = multiprocessing.cpu_count()
 
-if args.dont_copy_album_art:
-    copy_album_art = False
-
-if args.delete_non_existent:
-    delete_not_existent = True
 
 logger.info('Host: ' + host + ":" + str(port))
 logger.info('MPD music folder: ' + mpd_root_dir)
 logger.info('Destination folder: ' + dest_dir)
-logger.info('FLAC files:' + 'copy' if copy_flac else 'transcode to ' + audio_format)
+logger.info('FLAC files:' + 'transcode to ' + audio_format if transcode_flac else 'copy')
+logger.info('MP3 files:' + 'transcode to ' + audio_format + ' if bitrate > ' + str(transcode_mp3_threshold/1000) + 'kbit/s' if transcode_mp3 else 'copy')
+logger.info('M4A files:' + 'transcode to ' + audio_format + ' if bitrate > ' + str(transcode_m4a_threshold/1000) + 'kbit/s' if transcode_m4a else 'copy')
 logger.info('Transcoder threads: ' + str(threads))
 
 current_milli_time = lambda: int(round(time.time() * 1000))
@@ -191,8 +171,8 @@ playlist = client.playlist()          # print the MPD version
 client.close()                     # send the close command
 client.disconnect()                # disconnect from the server
 
-flac_files = {}
-flac_files_size = 0
+transcode_jobs = {}
+transcode_jobs_size = 0
 size = 0
 mytime = 0
 added_files = set()
@@ -211,8 +191,25 @@ for item in playlist:
     src_absolute_path = os.path.dirname(src_absolute_name)
 
     dest_absolute_name = os.path.join(dest_dir,src_relative_name) #exclude "file " (: replaced by re.sub()
-
     dest_absolute_path = os.path.dirname(dest_absolute_name)
+
+    transcode_file = False
+    if src_absolute_name.endswith(".flac") and transcode_flac:
+        transcode_file = True
+        dest_absolute_name = re.sub(r".m4a$", "." + audio_format, dest_absolute_name)
+        dest_absolute_name = re.sub(r".flac$", "." + audio_format, dest_absolute_name)
+
+    if src_absolute_name.endswith(".mp3") and transcode_mp3:
+        audio = MP3(src_absolute_name)
+        if audio.info.bitrate >= transcode_mp3_threshold:
+            transcode_file = True
+            dest_absolute_name = re.sub(r".mp3$", "." + audio_format, dest_absolute_name)
+
+    if src_absolute_name.endswith(".m4a") and transcode_m4a:
+        audio = MP4(src_absolute_name)
+        if audio.info.bitrate >= transcode_m4a_threshold:
+            transcode_file = True
+            dest_absolute_name = re.sub(r".m4a$", "." + audio_format, dest_absolute_name)
 
     folders[src_absolute_path] = dest_absolute_path
     item_size += 1
@@ -223,30 +220,24 @@ for item in playlist:
         continue
 
     # Create directories on destination, if they don't exist
-    if not os.path.exists(dest_absolute_path):
+    elif not os.path.exists(dest_absolute_path):
         os.makedirs(dest_absolute_path)
 
-    # Transcode flac files to ogg vorbis q4 on destination
-    if dest_absolute_name.endswith(".flac") and not copy_flac:
-
-        dest_absolute_name = re.sub(r".flac$", "." + audio_format, dest_absolute_name) # replace file extension
-        #transcoded_file = dest_absolute_name[:dest_absolute_name.rfind('.')] + "." + audio_format
+    # Add file to transcode jobs dict if specified
+    if transcode_file:
         added_files.add(dest_absolute_name)
-
         if not os.path.exists(dest_absolute_name):
-            if src_relativ_path in flac_files:
-
-                flac_files[src_relativ_path].append(transcode_job(src_absolute_name, dest_absolute_name))
-                flac_files_size += 1
-
+            if src_relativ_path in transcode_jobs:
+                transcode_jobs[src_relativ_path].append(transcode_job(src_absolute_name, dest_absolute_name))
+                transcode_jobs_size += 1
             else:
-                flac_files[src_relativ_path] = []
-                flac_files[src_relativ_path].append(transcode_job(src_absolute_name, dest_absolute_name))
-                flac_files_size += 1
+                transcode_jobs[src_relativ_path] = []
+                transcode_jobs[src_relativ_path].append(transcode_job(src_absolute_name, dest_absolute_name))
+                transcode_jobs_size += 1
         else:
             logger.debug("Transcoded file exists: " + dest_absolute_name)
 
-    # Copy non-flac media files directly to destination
+    # Copy all other audio files directly to destination
     else:
         added_files.add(dest_absolute_name)
         cur_time = current_milli_time()
@@ -264,69 +255,36 @@ for item in playlist:
 
 logger.info("Transferred " + str(size)[:str(size).find(".")+3] + " MB.")
 
-if flac_files:
-    logger.info("Start transcoding flac files now.")
+if transcode_jobs:
+    logger.info("Start transcoding audio files now.")
     done = 0
     processes = set()
-    for list in flac_files:
-        if audio_format == "ogg":
-            for job in flac_files[list]:
-                logger.debug("Encoding file:" + job.dest)
-                processes.add(subprocess.Popen(["oggenc", "-q", "4", "--resample", "44100",
-                                                job.src, "-o", job.dest],
+    for list in transcode_jobs:
+        for job in transcode_jobs[list]:
+            logger.debug("Encoding file:" + job.dest)
+            if audio_format == "ogg":
+                processes.add(subprocess.Popen(["ffmpeg", "-i", job.src,
+                                                "-c", "libvorbis", "-q", str(audio_quality_vorbis), job.dest],
                                                stdout=subprocess.PIPE, stderr=subprocess.PIPE))
-                if platform == "windows":
-                    while len(processes) >= threads:
-                        time.sleep(.1) #for windows compatibility
-                        processes.difference_update([p for p in processes if p.poll() is not None])
-                else:
-                    if len(processes) >= threads:
-                        os.wait()
-                        processes.difference_update([p for p in processes if p.poll() is not None])
-        elif audio_format == "mp3":
-            for job in flac_files[list]:
-                logger.debug("Encoding file:" + job.dest)
-                audio = FLAC(job.src)
-                title = "" if audio.get("title") == None else audio.get("title")[0]
-                artist = "" if audio.get("artist") == None else audio.get("artist")[0]
-                album = "" if audio.get("album") == None else audio.get("album")[0]
-                genre = "" if audio.get("genre") == None else audio.get("genre")[0]
-                tracknumber = "" if audio.get("tracknumber") == None else audio.get("tracknumber")[0]
-                date = "" if audio.get("date") == None else audio.get("date")[0]
-
-                ps = subprocess.Popen(["flac",  "-d", "-c", job.src],
-                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                ps2 = subprocess.Popen(["lame", "-V2", "--resample", "44.1", "--tt", title,
-                                           "--ta", artist, "--tl", album, "--ty", date,
-                                           "--tn", tracknumber, "--tg", genre, "--id3v2-only", "--id3v2-utf16"
-                                           , "-", job.dest],
-                                       stdin=ps.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                processes.add(ps2)
-                if platform == "windows":
-                    while len(processes) >= threads:
-                        time.sleep(.1) #for windows compatibility
-                        processes.difference_update([p for p in processes if p.poll() is not None])
-                else:
-                    while len(processes) >= threads:
-                        os.wait()
-                        processes.difference_update([p for p in processes if p.poll() is not None])
-        elif audio_format == "opus":
-            for job in flac_files[list]:
-                logger.debug("Encoding file:" + job.dest)
+            elif audio_format == "mp3":
+                processes.add(subprocess.Popen(["ffmpeg", "-i", job.src,
+                                                "-c", "libmp3lame", "-q", str(audio_quality_lame), job.dest],
+                                               stdout=subprocess.PIPE, stderr=subprocess.PIPE))
+            elif audio_format == "opus":
                 #use ffmpeg instead of opusenc for preventing the application of R128 gain, making replaygain work as expected
                 processes.add(subprocess.Popen(["ffmpeg", "-i", job.src,
-                                                "-c", "libopus", job.dest],
+                                                "-c", "libopus", "-b", str(audio_quality_opus), job.dest],
                                                stdout=subprocess.PIPE, stderr=subprocess.PIPE))
-                if platform == "windows":
-                    while len(processes) >= threads:
-                        time.sleep(.1) #for windows compatibility
-                        processes.difference_update([p for p in processes if p.poll() is not None])
-                else:
-                    if len(processes) >= threads:
-                        os.wait()
-                        processes.difference_update([p for p in processes if p.poll() is not None])
-        done += len(flac_files[list])
-        logger.info("Encoded " + str(done) + "/" + str(flac_files_size) + " files ("+str(int(100*done/flac_files_size))+"%).")
+            if platform == "windows":
+                while len(processes) >= threads:
+                    time.sleep(.1) #for windows compatibility
+                    processes.difference_update([p for p in processes if p.poll() is not None])
+            else:
+                if len(processes) >= threads:
+                    os.wait()
+                    processes.difference_update([p for p in processes if p.poll() is not None])
+        done += len(transcode_jobs[list])
+        logger.info("Encoded " + str(done) + "/" + str(transcode_jobs_size) + " files (" + str(int(100 * done / transcode_jobs_size)) + "%).")
 
 # Copy image files (jpg,png,gif) to destination
 if copy_album_art:
