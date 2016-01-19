@@ -45,6 +45,9 @@ else:
         config_file = os.path.join(os.getenv("APPDATA"), "mpd-ps", "mpd-ps.conf")
     else:
         config_file = os.path.join(os.path.expanduser("~"), ".config", "mpd-ps", "mpd-ps.conf")
+    if os.path.exists("mpd-ps.conf"):
+        config_file = os.path.join("mpd-ps.conf")
+
 
 host = "localhost"
 port = ""
@@ -52,7 +55,7 @@ password = ""
 mpd_root_dir = ""
 dest_dir = ""
 audio_format = "opus"
-threads = ""
+threads = 8 
 verbose = False
 delete_non_existent = False
 copy_album_art = True
@@ -107,7 +110,10 @@ if os.path.exists(config_file):
             audio_quality_vorbis = config.getfloat('General', 'audio_quality_vorbis')
         if config.has_option('General', 'audio_quality_opus'): # in bit/s
             audio_quality_opus = config.getint('General', 'audio_quality_opus')
-
+else:
+    logger.error("Config file not found. Config file has to be places in the same folder as this script or in $HOME/.conf/mpd-ps/mpd-ps.conf or to be specified by using the --config [PATH_TO_CONF] switch.")
+    exit(-1)
+   
 ##Parse command line arguments
 logger = logging.getLogger("mpd-ps")
 if verbose:
