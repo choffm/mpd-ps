@@ -5,18 +5,17 @@ Dependencies:
 =============
 - Python 3
 - python-mpd2 (https://github.com/Mic92/python-mpd2)
-- Optional for transcoding FLAC to OGG/MP3: oggenc / lame
-- Optional for transcoding FLAC to MP3: python-mutagen
-- Optional for transcoding FLAC to OPUS: ffmpeg with libopus support
+- Optional for any transcoding: python-mutagen
+- Optional for transcoding FLAC/MP3/M4A to OGG/OPUS/MP3: ffmpeg with libvorbis / libopus / libmp3lame support
 
 Features:
 ============
 - Incrementally syncs the current MPC playlist with a target directory / device
 - Optionally deletes files removed from MPD playlist
 - Optionally syncs album art
-- Optionally transcodes .flac files to ogg vorbis, opus or mp3 using oggenc, ffmpeg/libopus and lame mp3 encoder
-- Multi-threaded transcoding of flac to MP3 or OGG Vorbis 
-- Supports config file (Default: ~/.config/mpd-ps/mpd-ps.conf or HOME/AppData/Roaming/mpd-ps/mpd-ps.conf)
+- Optionally multi-threaded transcoding from FLAC, MP4 (.m4a) and MP3 to ogg vorbis, opus or lame mp3 using ffmpeg
+- Optionally bitrate dependend lossy to lossy transcoding, configurable separately for MP3 and M4A
+- Configuration via config file (Default: ./mpd-ps.conf, $HOME/.config/mpd-ps/mpd-ps.conf or $HOME/AppData/Roaming/mpd-ps/mpd-ps.conf)
 
 Usage:
 ============
