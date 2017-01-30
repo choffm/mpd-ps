@@ -1,3 +1,5 @@
+#!/usr/bin/python3
+
 import argparse
 import configparser
 import logging
@@ -90,17 +92,17 @@ class MpdPs:
     def parse_config_file(self):
         if not self.config_file:
             if os.path.exists("mpd-ps.conf"):
-                config_file = os.path.join("mpd-ps.conf")
+                self.config_file = os.path.join("mpd-ps.conf")
             elif platform == "windows":
-                config_file = os.path.join(os.getenv("APPDATA"), "mpd-ps",
-                                           "mpd-ps.conf")
+                self.config_file = os.path.join(os.getenv("APPDATA"), "mpd-ps",
+                                                "mpd-ps.conf")
             else:
-                config_file = os.path.join(os.path.expanduser("~"),
-                                           ".config", "mpd-ps",
-                                           "mpd-ps.conf")
+                self.config_file = os.path.join(os.path.expanduser("~"),
+                                                ".config", "mpd-ps",
+                                                "mpd-ps.conf")
         config_parser = configparser.RawConfigParser()
-        config_parser.read(config_file)
-        if os.path.exists(config_file):
+        config_parser.read(self.config_file)
+        if os.path.exists(self.config_file):
             if config_parser.has_section('Host'):
                 if config_parser.has_option('Host', 'host'):
                     self.host = config_parser.get('Host', 'host')
@@ -174,12 +176,13 @@ class MpdPs:
         else:
             logging.basicConfig(level=logging.INFO)
 
-        if os.path.exists(config_file):
-            self.logger.info('Using configuration file: ' + config_file)
+        if os.path.exists(self.config_file):
+            self.logger.info('Using configuration file: ' + self.config_file)
         else:
             self.logger.error(
-                'Configuration file ' + config_file + " doesn't not exist. "
-                                                      "Aborting.")
+                'Configuration file ' + self.config_file + " doesn't not "
+                                                           "exist. "
+                                                           "Aborting.")
             exit(-1)
 
         if not self.mpd_root_dir:
@@ -197,7 +200,7 @@ class MpdPs:
         if self.audio_format == "":
             self.audio_format = "opus"
         elif self.audio_format != "ogg" and self.audio_format != "mp3" and \
-                self.audio_format != "opus":
+                        self.audio_format != "opus":
             self.logger.error(
                 "Bad audio format. mpd-ps supports ogg, opus and mp3.")
             exit(-1)
@@ -313,22 +316,26 @@ class MpdPs:
 
             # Add file to transcode jobs dict if specified
             if transcode_file:
-                added_files.add(dest_absolute_name)
-                if not os.path.exists(dest_absolute_name):
-                    if src_relativ_path in transcode_jobs:
-                        transcode_jobs[src_relativ_path].append(
-                            self.TranscodingJob(src_absolute_name,
-                                                dest_absolute_name))
-                        transcode_jobs_size += 1
+                if dest_absolute_name not in added_files:
+                    added_files.add(dest_absolute_name)
+                    if not os.path.exists(dest_absolute_name):
+                        if src_relativ_path in transcode_jobs:
+                            transcode_jobs[src_relativ_path].append(
+                                self.TranscodingJob(src_absolute_name,
+                                                    dest_absolute_name))
+                            transcode_jobs_size += 1
+                        else:
+                            transcode_jobs[src_relativ_path] = []
+                            transcode_jobs[src_relativ_path].append(
+                                self.TranscodingJob(src_absolute_name,
+                                                    dest_absolute_name))
+                            transcode_jobs_size += 1
                     else:
-                        transcode_jobs[src_relativ_path] = []
-                        transcode_jobs[src_relativ_path].append(
-                            self.TranscodingJob(src_absolute_name,
-                                                dest_absolute_name))
-                        transcode_jobs_size += 1
+                        self.logger.debug(
+                            "Transcoded file exists: %s", dest_absolute_name)
                 else:
-                    self.logger.debug(
-                        "Transcoded file exists: " + dest_absolute_name)
+                    self.logger.debug("Duplicate playlist item ignored: %s",
+                                      dest_absolute_name)
 
             # Copy all other audio files directly to destination
             else:
@@ -345,7 +352,7 @@ class MpdPs:
                         self.logger.debug(
                             "Transferred " + str(count) + " files with " + str(
                                 size / mytime)[:str(size / mytime).find(
-                                    ".") + 3] + "MB/s")
+                                ".") + 3] + "MB/s")
                 except OSError:
                     self.logger.error(
                         "Copying " + src_absolute_name + " to " +
@@ -410,7 +417,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     platform = platform.system().lower()
     parser.add_argument("--config", help="specify path to config "
-                                                  "file.", dest="config")
+                                         "file.", dest="config")
     args = parser.parse_args()
     mpd_ps = MpdPs(args.config)
     mpd_ps.parse_config_file()
