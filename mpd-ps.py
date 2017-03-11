@@ -373,7 +373,8 @@ class MpdPs:
                     self.logger.debug("Encoding file:" + job.dest)
                     if self.audio_format == "ogg":
                         processes.add(subprocess.Popen(["ffmpeg", "-i", job.src,
-                                                        "-c:a", "libvorbis",
+                                                        "-vn", "-c:a",
+                                                        "libvorbis",
                                                         "-q",
                                                         str(
                                                             self.audio_quality_vorbis),
@@ -382,7 +383,8 @@ class MpdPs:
                                                        stderr=subprocess.PIPE))
                     elif self.audio_format == "mp3":
                         processes.add(subprocess.Popen(["ffmpeg", "-i", job.src,
-                                                        "-c:a", "libmp3lame",
+                                                        "-vn", "-c:a",
+                                                        "libmp3lame",
                                                         "-q",
                                                         str(
                                                             self.audio_quality_lame),
@@ -391,7 +393,8 @@ class MpdPs:
                                                        stderr=subprocess.PIPE))
                     elif self.audio_format == "opus":
                         processes.add(subprocess.Popen(["ffmpeg", "-i", job.src,
-                                                        "-c:a", "libopus", "-b",
+                                                        "-vn", "-c:a",
+                                                        "libopus", "-b",
                                                         str(
                                                             self.audio_quality_opus),
                                                         job.dest],
