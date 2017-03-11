@@ -276,6 +276,9 @@ class MpdPs:
                                               src_relative_name)
             dest_absolute_path = os.path.dirname(dest_absolute_name)
 
+            if not os.path.isfile(src_absolute_name):
+                continue
+
             transcode_file = False
             if src_absolute_name.endswith(".flac") and self.transcode_flac:
                 transcode_file = True
@@ -370,7 +373,8 @@ class MpdPs:
                     self.logger.debug("Encoding file:" + job.dest)
                     if self.audio_format == "ogg":
                         processes.add(subprocess.Popen(["ffmpeg", "-i", job.src,
-                                                        "-c", "libvorbis", "-q",
+                                                        "-c:a", "libvorbis",
+                                                        "-q",
                                                         str(
                                                             self.audio_quality_vorbis),
                                                         job.dest],
@@ -378,7 +382,7 @@ class MpdPs:
                                                        stderr=subprocess.PIPE))
                     elif self.audio_format == "mp3":
                         processes.add(subprocess.Popen(["ffmpeg", "-i", job.src,
-                                                        "-c", "libmp3lame",
+                                                        "-c:a", "libmp3lame",
                                                         "-q",
                                                         str(
                                                             self.audio_quality_lame),
@@ -387,7 +391,7 @@ class MpdPs:
                                                        stderr=subprocess.PIPE))
                     elif self.audio_format == "opus":
                         processes.add(subprocess.Popen(["ffmpeg", "-i", job.src,
-                                                        "-c", "libopus", "-b",
+                                                        "-c:a", "libopus", "-b",
                                                         str(
                                                             self.audio_quality_opus),
                                                         job.dest],
